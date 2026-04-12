@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- NuGet metadata -->
+    <PackageId>SmppSharp</PackageId>
+    <Version>1.0.1</Version>
+    <Authors>Aziz</Authors>
+    <Description>Lightweight SMPP 3.4 client for .NET — connect, send, receive, auto-reconnect, multipart, GSM7/UCS2.</Description>
+    <PackageTags>smpp;sms;messaging;smpp34;telecom</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>CS1591</NoWarn>
+    <Deterministic>true</Deterministic>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.*" />
+  </ItemGroup>
+
+</Project>

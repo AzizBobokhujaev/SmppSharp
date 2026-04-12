@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SmppSharp/SmppSharp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SmppSharp.Tests/SmppSharp.Tests.csproj" />
+  </Folder>
+</Solution>
