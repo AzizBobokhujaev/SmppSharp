@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyDescriptionAttribute(("Lightweight SMPP 3.4 client for .NET — connect, send, receive, auto-reconnect, mu" +
     "ltipart, GSM7/UCS2."))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.1.1.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.1.1+b74f97f3ba131681c5d81a43c860cba38f8b79aa")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.1.1+741464ec31aa45067298540e5722193309d9b270")]
 [assembly: System.Reflection.AssemblyProductAttribute("SmppSharp")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SmppSharp")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.1.1.0")]
