@@ -4,6 +4,87 @@
         <name>SmppSharp</name>
     </assembly>
     <members>
+        <member name="T:SmppSharp.Builders.SubmitRequestBuilder">
+            <summary>
+            Fluent builder for <see cref="T:SmppSharp.Models.SubmitRequest"/>.
+            </summary>
+            <example>
+            <code>
+            var request = new SubmitRequestBuilder()
+                .From("PAYOMAK")
+                .To("+998901234567")
+                .Text("Ваш код: 1234")
+                .Flash()
+                .WithDeliveryReport()
+                .Build();
+            </code>
+            </example>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.Text(System.String)">
+            <summary>Set a text message. Auto-detects GSM7 vs UCS2.</summary>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.Binary(System.Byte[])">
+            <summary>Set a raw binary payload (data_coding=0x04).</summary>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.Flash">
+            <summary>Send as Flash SMS (Class 0) — displayed immediately, not stored.</summary>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.WithDeliveryReport(System.Boolean)">
+            <summary>Request a delivery report. Default: enabled.</summary>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.ForceUcs2">
+            <summary>Force UCS2 encoding even for ASCII-only text.</summary>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.ValidFor(System.TimeSpan)">
+            <summary>Set message validity period.</summary>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.WithCorrelationId(System.String)">
+            <summary>Attach a correlation ID for tracking (not sent to SMSC).</summary>
+        </member>
+        <member name="M:SmppSharp.Builders.SubmitRequestBuilder.WithEsmClass(System.Byte)">
+            <summary>Advanced: override the esm_class byte.</summary>
+        </member>
+        <member name="T:SmppSharp.Builders.WapPushBuilder">
+             <summary>
+             Builds WAP Push Service Indication (SI) messages.
+             Generates the correct binary payload (UDH + WSP + WBXML) for sending via SMPP.
+             </summary>
+             <example>
+             <code>
+             var request = WapPushBuilder.CreateSi(
+                 sourceAddress:      "PAYOMAK",
+                 destinationAddress: "+998901234567",
+                 url:                "https://example.com/promo",
+                 message:            "Нажмите для просмотра акции",
+                 signal:             WapPushSignal.Medium);
+            
+             await client.SubmitAsync(request);
+             </code>
+             </example>
+        </member>
+        <member name="M:SmppSharp.Builders.WapPushBuilder.CreateSi(System.String,System.String,System.String,System.String,SmppSharp.Builders.WapPushSignal)">
+            <summary>
+            Creates a WAP Push Service Indication request ready to be submitted via SMPP.
+            </summary>
+        </member>
+        <member name="T:SmppSharp.Builders.WapPushSignal">
+            <summary>Signal priority for WAP Push Service Indication.</summary>
+        </member>
+        <member name="F:SmppSharp.Builders.WapPushSignal.None">
+            <summary>No signal — silently delivered.</summary>
+        </member>
+        <member name="F:SmppSharp.Builders.WapPushSignal.Low">
+            <summary>Low priority signal.</summary>
+        </member>
+        <member name="F:SmppSharp.Builders.WapPushSignal.Medium">
+            <summary>Medium priority signal (recommended default).</summary>
+        </member>
+        <member name="F:SmppSharp.Builders.WapPushSignal.High">
+            <summary>High priority — phone may vibrate/ring.</summary>
+        </member>
+        <member name="F:SmppSharp.Builders.WapPushSignal.Delete">
+            <summary>Delete a previously sent SI with the same href.</summary>
+        </member>
         <member name="T:SmppSharp.Codec.Gsm7Encoder">
             <summary>
             GSM 7-bit default alphabet encoder/decoder.
@@ -26,6 +107,9 @@
             <summary>
             Determines encoding and splits messages into SMS segments.
             </summary>
+        </member>
+        <member name="M:SmppSharp.Codec.MessageSplitter.EncodeBinary(System.Byte[])">
+            <summary>Encodes a raw binary payload (data_coding = 0x04). Max 140 bytes/SMS.</summary>
         </member>
         <member name="M:SmppSharp.Extensions.ServiceCollectionExtensions.AddSmpp(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{SmppSharp.SmppOptions})">
             <summary>
@@ -206,13 +290,24 @@
         </member>
         <member name="M:SmppSharp.ISmppClient.SubmitAsync(SmppSharp.Models.SubmitRequest,System.Threading.CancellationToken)">
             <summary>
-            Submits an SMS. Automatically splits into multipart segments if needed.
-            Encoding is auto-detected: GSM7 for Latin, UCS2 for Cyrillic/Unicode.
+            Submits an SMS. Automatically:
+            <list type="bullet">
+              <item>Detects encoding (GSM7 for Latin, UCS2 for Cyrillic/Arabic/CJK/emoji)</item>
+              <item>Splits into multipart segments if needed</item>
+              <item>Handles binary and Flash SMS via <see cref="T:SmppSharp.Models.SubmitRequest"/> flags</item>
+            </list>
             </summary>
         </member>
         <member name="M:SmppSharp.ISmppClient.SubmitBulkAsync(System.Collections.Generic.IEnumerable{SmppSharp.Models.SubmitRequest},System.Int32,System.Threading.CancellationToken)">
             <summary>
-            Submits multiple SMS messages with controlled concurrency.
+            Submits multiple messages with controlled concurrency.
+            Returns when all messages are sent.
+            </summary>
+        </member>
+        <member name="M:SmppSharp.ISmppClient.SubmitPipelineAsync(System.Collections.Generic.IAsyncEnumerable{SmppSharp.Models.SubmitRequest},System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            High-throughput streaming pipeline. Submits requests as they arrive and yields results
+            as they complete. Suitable for bulk campaigns > 1000 msg/sec.
             </summary>
         </member>
         <member name="T:SmppSharp.Models.DeliverMessage">
@@ -253,6 +348,22 @@
         <member name="P:SmppSharp.Models.SubmitRequest.ValidityPeriod">
             <summary>Message validity period. null = SMSC default.</summary>
         </member>
+        <member name="P:SmppSharp.Models.SubmitRequest.Payload">
+            <summary>
+            Raw binary payload. When set, overrides <see cref="P:SmppSharp.Models.SubmitRequest.Message"/> and sends a binary SMS
+            (data_coding = 0x04). Use for WAP Push, ringtones, OTA configs, etc.
+            </summary>
+        </member>
+        <member name="P:SmppSharp.Models.SubmitRequest.IsFlash">
+            <summary>
+            Flash SMS (Class 0) — displayed immediately on the handset without being stored.
+            </summary>
+        </member>
+        <member name="P:SmppSharp.Models.SubmitRequest.EsmClass">
+            <summary>
+            Advanced: override esm_class byte. 0x40 = UDH indicator (set automatically for WAP Push).
+            </summary>
+        </member>
         <member name="P:SmppSharp.Models.SubmitRequest.CorrelationId">
             <summary>Optional arbitrary reference attached to this request (not sent to SMSC).</summary>
         </member>
@@ -290,7 +401,7 @@
             <summary>SMPP 3.4 command status codes.</summary>
         </member>
         <member name="T:SmppSharp.Protocol.DataCoding">
-            <summary>SMPP data_coding values.</summary>
+            <summary>SMPP data_coding values (GSM 03.38).</summary>
         </member>
         <member name="F:SmppSharp.Protocol.DataCoding.Gsm7">
             <summary>GSM 7-bit default alphabet (160 chars / SMS).</summary>
@@ -298,8 +409,17 @@
         <member name="F:SmppSharp.Protocol.DataCoding.Latin1">
             <summary>Latin-1 / ISO-8859-1.</summary>
         </member>
+        <member name="F:SmppSharp.Protocol.DataCoding.Binary">
+            <summary>8-bit binary data.</summary>
+        </member>
         <member name="F:SmppSharp.Protocol.DataCoding.Ucs2">
             <summary>UCS2 / UTF-16 Big Endian (70 chars / SMS). Required for Cyrillic, Arabic, CJK, etc.</summary>
+        </member>
+        <member name="F:SmppSharp.Protocol.DataCoding.Gsm7Flash">
+            <summary>GSM7 Flash SMS — Class 0 message, displayed immediately without storing.</summary>
+        </member>
+        <member name="F:SmppSharp.Protocol.DataCoding.Ucs2Flash">
+            <summary>UCS2 Flash SMS — Class 0 message in Unicode.</summary>
         </member>
         <member name="T:SmppSharp.Protocol.Pdu">
             <summary>Parsed SMPP PDU.</summary>
@@ -327,7 +447,8 @@
         </member>
         <member name="T:SmppSharp.SmppClient">
             <summary>
-            SMPP 3.4 client. Thread-safe, auto-reconnecting, supports multipart messages.
+            SMPP 3.4 client. Thread-safe, auto-reconnecting, supports text/binary/flash/WAP Push.
+            Integrates with System.Diagnostics.Metrics for observability.
             </summary>
         </member>
         <member name="T:SmppSharp.SmppException">
@@ -335,6 +456,36 @@
         </member>
         <member name="P:SmppSharp.SmppException.CommandStatus">
             <summary>SMPP command_status code, if available.</summary>
+        </member>
+        <member name="T:SmppSharp.SmppMetrics">
+            <summary>
+            Diagnostic metrics for SmppSharp using System.Diagnostics.Metrics.
+            Compatible with OpenTelemetry, Prometheus, and any IMeterFactory consumer.
+            </summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.MeterName">
+            <summary>Meter name. Use this to subscribe with OpenTelemetry: .AddMeter("SmppSharp").</summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.MessagesSent">
+            <summary>Total SMS segments successfully submitted (each multipart counts per segment).</summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.MessagesFailed">
+            <summary>Total submit_sm operations that failed.</summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.MessagesReceived">
+            <summary>Total MO (mobile-originated) messages received.</summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.ReceiptsReceived">
+            <summary>Total delivery receipts received from the SMSC.</summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.Reconnects">
+            <summary>Total reconnect attempts (both successful and failed).</summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.SubmitDuration">
+            <summary>Time from sending submit_sm to receiving submit_sm_resp (ms).</summary>
+        </member>
+        <member name="F:SmppSharp.SmppMetrics.ActiveConnections">
+            <summary>Currently active (bound) SMPP connections.</summary>
         </member>
         <member name="T:SmppSharp.SmppOptions">
             <summary>Configuration for an SMPP client connection.</summary>
@@ -353,6 +504,15 @@
         </member>
         <member name="P:SmppSharp.SmppOptions.MaxReconnectAttempts">
             <summary>Maximum reconnect attempts. 0 = infinite.</summary>
+        </member>
+        <member name="P:SmppSharp.SmppOptions.UseSsl">
+            <summary>Enable SSL/TLS. Default: false.</summary>
+        </member>
+        <member name="P:SmppSharp.SmppOptions.SslTargetHost">
+            <summary>TLS target hostname. Defaults to Host if not set.</summary>
+        </member>
+        <member name="P:SmppSharp.SmppOptions.AllowUntrustedCertificate">
+            <summary>Skip certificate validation (useful for self-signed certs in dev). Default: false.</summary>
         </member>
         <member name="T:System.Text.RegularExpressions.Generated.IdPattern_0">
             <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the IdPattern method.</summary>

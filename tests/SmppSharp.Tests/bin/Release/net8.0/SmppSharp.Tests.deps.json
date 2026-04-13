@@ -9,7 +9,7 @@
       "SmppSharp.Tests/1.0.0": {
         "dependencies": {
           "Microsoft.NET.Test.Sdk": "17.8.0",
-          "SmppSharp": "1.0.0",
+          "SmppSharp": "1.0.1",
           "xunit": "2.5.3"
         },
         "runtime": {
@@ -430,7 +430,7 @@
           }
         }
       },
-      "SmppSharp/1.0.0": {
+      "SmppSharp/1.0.1": {
         "dependencies": {
           "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.3",
@@ -438,8 +438,8 @@
         },
         "runtime": {
           "SmppSharp.dll": {
-            "assemblyVersion": "1.0.0.0",
-            "fileVersion": "1.0.0.0"
+            "assemblyVersion": "1.0.1.0",
+            "fileVersion": "1.0.1.0"
           }
         }
       }
@@ -591,7 +591,7 @@
       "path": "xunit.extensibility.execution/2.5.3",
       "hashPath": "xunit.extensibility.execution.2.5.3.nupkg.sha512"
     },
-    "SmppSharp/1.0.0": {
+    "SmppSharp/1.0.1": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

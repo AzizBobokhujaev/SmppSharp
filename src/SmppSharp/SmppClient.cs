@@ -1,6 +1,10 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmppSharp.Codec;
@@ -11,7 +15,8 @@ using SmppSharp.Protocol;
 namespace SmppSharp;
 
 /// <summary>
-/// SMPP 3.4 client. Thread-safe, auto-reconnecting, supports multipart messages.
+/// SMPP 3.4 client. Thread-safe, auto-reconnecting, supports text/binary/flash/WAP Push.
+/// Integrates with System.Diagnostics.Metrics for observability.
 /// </summary>
 public sealed class SmppClient : ISmppClient
 {
@@ -19,7 +24,7 @@ public sealed class SmppClient : ISmppClient
     private readonly ILogger<SmppClient> _logger;
 
     private TcpClient? _tcp;
-    private NetworkStream? _stream;
+    private Stream? _stream;                    // NetworkStream or SslStream
     private uint _sequence;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<uint, TaskCompletionSource<Pdu>> _pending = new();
@@ -46,7 +51,6 @@ public sealed class SmppClient : ISmppClient
     public async Task ConnectAsync(CancellationToken ct = default)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-
         await ConnectInternalAsync(_cts.Token);
 
         if (_options.AutoReconnect)
@@ -57,7 +61,27 @@ public sealed class SmppClient : ISmppClient
     {
         _tcp = new TcpClient { NoDelay = true };
         await _tcp.ConnectAsync(_options.Host, _options.Port, ct);
-        _stream = _tcp.GetStream();
+
+        Stream baseStream = _tcp.GetStream();
+
+        if (_options.UseSsl)
+        {
+            var ssl = new SslStream(
+                baseStream,
+                leaveInnerStreamOpen: false,
+                userCertificateValidationCallback: _options.AllowUntrustedCertificate
+                    ? (_, _, _, _) => true
+                    : null);
+
+            await ssl.AuthenticateAsClientAsync(_options.SslTargetHost ?? _options.Host);
+
+            _stream = ssl;
+            _logger.LogDebug("SMPP TLS handshake OK ({Protocol})", ssl.SslProtocol);
+        }
+        else
+        {
+            _stream = baseStream;
+        }
 
         _readLoop      = Task.Run(() => ReadLoopAsync(ct), CancellationToken.None);
         _keepAliveLoop = Task.Run(() => KeepAliveLoopAsync(ct), CancellationToken.None);
@@ -65,16 +89,18 @@ public sealed class SmppClient : ISmppClient
         await BindAsync(ct);
 
         IsConnected = true;
-        _logger.LogInformation("SMPP connected and bound to {Host}:{Port}", _options.Host, _options.Port);
+        SmppMetrics.ActiveConnections.Add(1);
+        _logger.LogInformation("SMPP connected and bound to {Host}:{Port} (ssl={Ssl})",
+            _options.Host, _options.Port, _options.UseSsl);
     }
 
     private async Task BindAsync(CancellationToken ct)
     {
-        var (commandId, _) = _options.BindMode switch
+        var commandId = _options.BindMode switch
         {
-            BindMode.Transmitter => (CommandId.BindTransmitter, CommandId.BindTransmitterResp),
-            BindMode.Receiver    => (CommandId.BindReceiver,    CommandId.BindReceiverResp),
-            _                    => (CommandId.BindTransceiver, CommandId.BindTransceiverResp),
+            BindMode.Transmitter => CommandId.BindTransmitter,
+            BindMode.Receiver    => CommandId.BindReceiver,
+            _                    => CommandId.BindTransceiver,
         };
 
         var body = new List<byte>();
@@ -89,25 +115,20 @@ public sealed class SmppClient : ISmppClient
         var resp = await SendAndWaitAsync(commandId, [.. body], ct);
 
         if (!resp.IsOk)
-            throw new SmppException($"Bind failed: {CommandStatus.Describe(resp.CommandStatus)}",
-                resp.CommandStatus);
+            throw new SmppException(
+                $"Bind failed: {CommandStatus.Describe(resp.CommandStatus)}", resp.CommandStatus);
     }
 
     public async Task DisconnectAsync(CancellationToken ct = default)
     {
         if (!IsConnected) return;
-
-        try
-        {
-            await SendAndWaitAsync(CommandId.Unbind, [], ct);
-        }
-        catch { /* best effort */ }
-
+        try { await SendAndWaitAsync(CommandId.Unbind, [], ct); } catch { }
         await CleanupAsync();
     }
 
     private async Task CleanupAsync()
     {
+        if (IsConnected) SmppMetrics.ActiveConnections.Add(-1);
         IsConnected = false;
         _cts?.Cancel();
 
@@ -118,7 +139,7 @@ public sealed class SmppClient : ISmppClient
         _stream?.Dispose();
         _tcp?.Dispose();
 
-        if (_readLoop != null)      try { await _readLoop; }      catch { }
+        if (_readLoop      != null) try { await _readLoop; }      catch { }
         if (_keepAliveLoop != null) try { await _keepAliveLoop; } catch { }
 
         _stream = null;
@@ -132,19 +153,34 @@ public sealed class SmppClient : ISmppClient
         if (!IsConnected)
             throw new InvalidOperationException("SMPP client is not connected.");
 
-        var encoded = MessageSplitter.Encode(request.Message, request.ForceUcs2);
+        var encoded = request.Payload != null
+            ? MessageSplitter.EncodeBinary(request.Payload)
+            : MessageSplitter.Encode(request.Message, request.ForceUcs2, request.IsFlash);
 
-        var messageId = encoded.IsMultipart
-            ? await SubmitMultipartAsync(request, encoded, ct)
-            : await SubmitSingleAsync(request, encoded.AllBytes, encoded.DataCoding, ct);
-
-        return new SubmitResult
+        var sw = Stopwatch.StartNew();
+        try
         {
-            MessageId      = messageId,
-            SegmentCount   = encoded.Segments.Count,
-            DataCoding     = encoded.DataCoding,
-            CorrelationId  = request.CorrelationId,
-        };
+            var messageId = encoded.IsMultipart
+                ? await SubmitMultipartAsync(request, encoded, ct)
+                : await SubmitSingleAsync(request, encoded.AllBytes, encoded.DataCoding, ct);
+
+            sw.Stop();
+            SmppMetrics.MessagesSent.Add(encoded.Segments.Count);
+            SmppMetrics.SubmitDuration.Record(sw.Elapsed.TotalMilliseconds);
+
+            return new SubmitResult
+            {
+                MessageId     = messageId,
+                SegmentCount  = encoded.Segments.Count,
+                DataCoding    = encoded.DataCoding,
+                CorrelationId = request.CorrelationId,
+            };
+        }
+        catch
+        {
+            SmppMetrics.MessagesFailed.Add(1);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<SubmitResult>> SubmitBulkAsync(
@@ -152,26 +188,69 @@ public sealed class SmppClient : ISmppClient
         int maxConcurrency = 10,
         CancellationToken ct = default)
     {
-        var semaphore = new SemaphoreSlim(maxConcurrency);
-        var results   = new ConcurrentBag<SubmitResult>();
+        var sem     = new SemaphoreSlim(maxConcurrency);
+        var results = new ConcurrentBag<SubmitResult>();
 
         var tasks = requests.Select(async req =>
         {
-            await semaphore.WaitAsync(ct);
-            try
-            {
-                var result = await SubmitAsync(req, ct);
-                results.Add(result);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
+            await sem.WaitAsync(ct);
+            try   { results.Add(await SubmitAsync(req, ct)); }
+            finally { sem.Release(); }
         });
 
         await Task.WhenAll(tasks);
         return [.. results];
     }
+
+    public async IAsyncEnumerable<SubmitResult> SubmitPipelineAsync(
+        IAsyncEnumerable<SubmitRequest> requests,
+        int concurrency = 100,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var channel = Channel.CreateBounded<SubmitResult>(
+            new BoundedChannelOptions(concurrency * 2)
+            {
+                SingleReader          = true,
+                SingleWriter          = false,
+                FullMode              = BoundedChannelFullMode.Wait,
+                AllowSynchronousContinuations = false,
+            });
+
+        var producer = Task.Run(async () =>
+        {
+            var sem   = new SemaphoreSlim(concurrency);
+            var tasks = new List<Task>();
+
+            await foreach (var request in requests.WithCancellation(ct))
+            {
+                await sem.WaitAsync(ct);
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        var result = await SubmitAsync(request, ct);
+                        await channel.Writer.WriteAsync(result, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Pipeline: failed to submit to {Dest}",
+                            request.DestinationAddress);
+                    }
+                    finally { sem.Release(); }
+                }, ct));
+            }
+
+            await Task.WhenAll(tasks);
+            channel.Writer.Complete();
+        }, CancellationToken.None);
+
+        await foreach (var result in channel.Reader.ReadAllAsync(ct))
+            yield return result;
+
+        await producer;
+    }
+
+    // ── Internal submit helpers ──────────────────────────────────
 
     private async Task<string> SubmitSingleAsync(
         SubmitRequest request, byte[] msgBytes, byte dataCoding, CancellationToken ct)
@@ -179,7 +258,8 @@ public sealed class SmppClient : ISmppClient
         var body = BuildSubmitSmBody(
             request.SourceAddress, request.DestinationAddress,
             msgBytes, dataCoding,
-            request.RegisteredDelivery, request.ValidityPeriod);
+            request.RegisteredDelivery, request.ValidityPeriod,
+            esmClass: request.EsmClass);
 
         var resp = await SendAndWaitAsync(CommandId.SubmitSm, body, ct);
 
@@ -193,9 +273,9 @@ public sealed class SmppClient : ISmppClient
     private async Task<string> SubmitMultipartAsync(
         SubmitRequest request, EncodedMessage encoded, CancellationToken ct)
     {
-        var refNum   = (ushort)Random.Shared.Next(1, 65536);
-        var total    = (byte)encoded.Segments.Count;
-        var lastId   = string.Empty;
+        var refNum = (ushort)Random.Shared.Next(1, 65536);
+        var total  = (byte)encoded.Segments.Count;
+        var lastId = string.Empty;
 
         for (byte i = 0; i < total; i++)
         {
@@ -203,6 +283,7 @@ public sealed class SmppClient : ISmppClient
                 request.SourceAddress, request.DestinationAddress,
                 encoded.Segments[i], encoded.DataCoding,
                 request.RegisteredDelivery, request.ValidityPeriod,
+                esmClass: request.EsmClass,
                 sarRef: refNum, sarTotal: total, sarSeq: (byte)(i + 1));
 
             var resp = await SendAndWaitAsync(CommandId.SubmitSm, body, ct);
@@ -213,8 +294,7 @@ public sealed class SmppClient : ISmppClient
                     resp.CommandStatus);
 
             lastId = new PduReader(resp.Body).ReadCString();
-
-            _logger.LogDebug("SMPP multipart segment {Seq}/{Total} sent, msgId={MsgId}", i + 1, total, lastId);
+            _logger.LogDebug("SMPP multipart {Seq}/{Total} → msgId={Id}", i + 1, total, lastId);
         }
 
         return lastId;
@@ -224,9 +304,10 @@ public sealed class SmppClient : ISmppClient
         string sourceAddr, string destAddr,
         byte[] msgBytes, byte dataCoding,
         bool registeredDelivery, TimeSpan? validityPeriod,
+        byte esmClass = 0x00,
         ushort sarRef = 0, byte sarTotal = 0, byte sarSeq = 0)
     {
-        var srcTon = sourceAddr.Any(char.IsLetter) ? (byte)0x05 : (byte)0x01; // 5=alphanumeric, 1=international
+        var srcTon = sourceAddr.Any(char.IsLetter) ? (byte)0x05 : (byte)0x01;
         var srcNpi = srcTon == 0x05 ? (byte)0x00 : (byte)0x01;
 
         var validity = validityPeriod.HasValue
@@ -235,30 +316,29 @@ public sealed class SmppClient : ISmppClient
 
         var body = new List<byte>();
         PduWriter.WriteCString(body, "");               // service_type
-        PduWriter.WriteByte(body, srcTon);              // source_addr_ton
-        PduWriter.WriteByte(body, srcNpi);              // source_addr_npi
-        PduWriter.WriteCString(body, sourceAddr);       // source_addr
-        PduWriter.WriteByte(body, 0x01);                // dest_addr_ton (international)
-        PduWriter.WriteByte(body, 0x01);                // dest_addr_npi (E.164)
-        PduWriter.WriteCString(body, destAddr);         // destination_addr
-        PduWriter.WriteByte(body, 0x00);                // esm_class
+        PduWriter.WriteByte(body, srcTon);
+        PduWriter.WriteByte(body, srcNpi);
+        PduWriter.WriteCString(body, sourceAddr);
+        PduWriter.WriteByte(body, 0x01);                // dest_addr_ton: international
+        PduWriter.WriteByte(body, 0x01);                // dest_addr_npi: E.164
+        PduWriter.WriteCString(body, destAddr);
+        PduWriter.WriteByte(body, esmClass);
         PduWriter.WriteByte(body, 0x00);                // protocol_id
         PduWriter.WriteByte(body, 0x00);                // priority_flag
         PduWriter.WriteCString(body, "");               // schedule_delivery_time
-        PduWriter.WriteCString(body, validity);         // validity_period
+        PduWriter.WriteCString(body, validity);
         PduWriter.WriteByte(body, registeredDelivery ? (byte)0x01 : (byte)0x00);
-        PduWriter.WriteByte(body, 0x00);                // replace_if_present_flag
-        PduWriter.WriteByte(body, dataCoding);          // data_coding
+        PduWriter.WriteByte(body, 0x00);                // replace_if_present
+        PduWriter.WriteByte(body, dataCoding);
         PduWriter.WriteByte(body, 0x00);                // sm_default_msg_id
         PduWriter.WriteByte(body, (byte)msgBytes.Length);
-        PduWriter.WriteOctets(body, msgBytes);          // short_message
+        PduWriter.WriteOctets(body, msgBytes);
 
-        // SAR TLV fields for multipart
         if (sarTotal > 1)
         {
-            PduWriter.WriteTlvUInt16(body, TlvTag.SarMsgRefNum,      sarRef);
-            PduWriter.WriteTlvByte(body,   TlvTag.SarTotalSegments,  sarTotal);
-            PduWriter.WriteTlvByte(body,   TlvTag.SarSegmentSeqnum,  sarSeq);
+            PduWriter.WriteTlvUInt16(body, TlvTag.SarMsgRefNum,     sarRef);
+            PduWriter.WriteTlvByte(body,   TlvTag.SarTotalSegments, sarTotal);
+            PduWriter.WriteTlvByte(body,   TlvTag.SarSegmentSeqnum, sarSeq);
         }
 
         return [.. body];
@@ -269,7 +349,6 @@ public sealed class SmppClient : ISmppClient
     private async Task ReadLoopAsync(CancellationToken ct)
     {
         var header = new byte[16];
-
         while (!ct.IsCancellationRequested)
         {
             try
@@ -308,7 +387,6 @@ public sealed class SmppClient : ISmppClient
     {
         switch (pdu.CommandId)
         {
-            // Responses — complete the pending request
             case CommandId.BindTransceiverResp:
             case CommandId.BindTransmitterResp:
             case CommandId.BindReceiverResp:
@@ -321,12 +399,10 @@ public sealed class SmppClient : ISmppClient
                     tcs.TrySetResult(pdu);
                 break;
 
-            // Incoming deliver_sm (MO or delivery receipt)
             case CommandId.DeliverSm:
                 await HandleDeliverSmAsync(pdu, ct);
                 break;
 
-            // Server-initiated keepalive — respond immediately
             case CommandId.EnquireLink:
                 var resp = PduWriter.Build(CommandId.EnquireLinkResp, 0, pdu.SequenceNumber, []);
                 await SendRawAsync(resp, ct);
@@ -336,33 +412,32 @@ public sealed class SmppClient : ISmppClient
 
     private async Task HandleDeliverSmAsync(Pdu pdu, CancellationToken ct)
     {
-        // ACK first — always
         var ack = PduWriter.Build(CommandId.DeliverSmResp, 0, pdu.SequenceNumber, [0x00]);
         await SendRawAsync(ack, ct);
 
         try
         {
             var r       = new PduReader(pdu.Body);
-            r.ReadCString();                       // service_type
-            r.ReadByte();                          // source_addr_ton
-            r.ReadByte();                          // source_addr_npi
+            r.ReadCString();
+            r.ReadByte();
+            r.ReadByte();
             var srcAddr  = r.ReadCString();
-            r.ReadByte();                          // dest_addr_ton
-            r.ReadByte();                          // dest_addr_npi
+            r.ReadByte();
+            r.ReadByte();
             var dstAddr  = r.ReadCString();
             var esmClass = r.ReadByte();
-            r.ReadByte();                          // protocol_id
-            r.ReadByte();                          // priority_flag
-            r.ReadCString();                       // schedule_delivery_time
-            r.ReadCString();                       // validity_period
-            r.ReadByte();                          // registered_delivery
-            r.ReadByte();                          // replace_if_present
+            r.ReadByte();
+            r.ReadByte();
+            r.ReadCString();
+            r.ReadCString();
+            r.ReadByte();
+            r.ReadByte();
             var dataCoding = r.ReadByte();
-            r.ReadByte();                          // sm_default_msg_id
+            r.ReadByte();
             var smLen    = r.ReadByte();
             var msgBytes = r.ReadBytes(smLen);
 
-            var text = dataCoding == DataCoding.Ucs2
+            var text = dataCoding == DataCoding.Ucs2 || dataCoding == DataCoding.Ucs2Flash
                 ? Encoding.BigEndianUnicode.GetString(msgBytes)
                 : Gsm7Encoder.Decode(msgBytes);
 
@@ -370,12 +445,14 @@ public sealed class SmppClient : ISmppClient
 
             if (isReceipt)
             {
+                SmppMetrics.ReceiptsReceived.Add(1);
                 var receipt = DeliveryReceiptParser.TryParse(text);
                 if (receipt != null && OnDeliveryReceived != null)
                     await OnDeliveryReceived(receipt);
             }
             else
             {
+                SmppMetrics.MessagesReceived.Add(1);
                 if (OnMessageReceived != null)
                     await OnMessageReceived(new DeliverMessage
                     {
@@ -401,17 +478,12 @@ public sealed class SmppClient : ISmppClient
             try
             {
                 await Task.Delay(_options.EnquireLinkInterval, ct);
-
                 if (!IsConnected) continue;
-
                 await SendAndWaitAsync(CommandId.EnquireLink, [], ct);
                 _logger.LogTrace("SMPP enquire_link OK");
             }
             catch (OperationCanceledException) { break; }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "SMPP enquire_link failed");
-            }
+            catch (Exception ex) { _logger.LogWarning(ex, "SMPP enquire_link failed"); }
         }
     }
 
@@ -421,31 +493,28 @@ public sealed class SmppClient : ISmppClient
     {
         while (!ct.IsCancellationRequested)
         {
-            // Wait until disconnected
             while (IsConnected && !ct.IsCancellationRequested)
                 await Task.Delay(500, ct);
 
             if (ct.IsCancellationRequested) break;
 
             var attempt = 0;
-
             while (!IsConnected && !ct.IsCancellationRequested)
             {
                 attempt++;
                 if (_options.MaxReconnectAttempts > 0 && attempt > _options.MaxReconnectAttempts)
                 {
-                    _logger.LogError("SMPP max reconnect attempts ({Max}) reached — giving up",
-                        _options.MaxReconnectAttempts);
+                    _logger.LogError("SMPP max reconnect attempts ({Max}) reached", _options.MaxReconnectAttempts);
                     return;
                 }
 
                 _logger.LogInformation("SMPP reconnect attempt {Attempt}…", attempt);
+                SmppMetrics.Reconnects.Add(1);
 
                 try
                 {
                     await Task.Delay(_options.ReconnectDelay, ct);
                     await ConnectInternalAsync(ct);
-
                     _logger.LogInformation("SMPP reconnected successfully");
                     OnReconnected?.Invoke();
                 }
@@ -460,6 +529,7 @@ public sealed class SmppClient : ISmppClient
     private void HandleDisconnect(Exception? ex)
     {
         if (!IsConnected) return;
+        SmppMetrics.ActiveConnections.Add(-1);
         IsConnected = false;
 
         foreach (var tcs in _pending.Values)
@@ -478,20 +548,14 @@ public sealed class SmppClient : ISmppClient
         var tcs = new TaskCompletionSource<Pdu>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         _pending[seq] = tcs;
-
         try
         {
             await SendRawAsync(raw, ct);
-
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(_options.ResponseTimeout);
-
             return await tcs.Task.WaitAsync(timeout.Token);
         }
-        finally
-        {
-            _pending.TryRemove(seq, out _);
-        }
+        finally { _pending.TryRemove(seq, out _); }
     }
 
     private async Task SendRawAsync(byte[] pdu, CancellationToken ct)

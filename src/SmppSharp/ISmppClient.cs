@@ -1,4 +1,5 @@
 using SmppSharp.Models;
+using System.Runtime.CompilerServices;
 
 namespace SmppSharp;
 
@@ -35,16 +36,30 @@ public interface ISmppClient : IAsyncDisposable
     // ── Sending ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Submits an SMS. Automatically splits into multipart segments if needed.
-    /// Encoding is auto-detected: GSM7 for Latin, UCS2 for Cyrillic/Unicode.
+    /// Submits an SMS. Automatically:
+    /// <list type="bullet">
+    ///   <item>Detects encoding (GSM7 for Latin, UCS2 for Cyrillic/Arabic/CJK/emoji)</item>
+    ///   <item>Splits into multipart segments if needed</item>
+    ///   <item>Handles binary and Flash SMS via <see cref="SubmitRequest"/> flags</item>
+    /// </list>
     /// </summary>
     Task<SubmitResult> SubmitAsync(SubmitRequest request, CancellationToken ct = default);
 
     /// <summary>
-    /// Submits multiple SMS messages with controlled concurrency.
+    /// Submits multiple messages with controlled concurrency.
+    /// Returns when all messages are sent.
     /// </summary>
     Task<IReadOnlyList<SubmitResult>> SubmitBulkAsync(
         IEnumerable<SubmitRequest> requests,
         int maxConcurrency = 10,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// High-throughput streaming pipeline. Submits requests as they arrive and yields results
+    /// as they complete. Suitable for bulk campaigns > 1000 msg/sec.
+    /// </summary>
+    IAsyncEnumerable<SubmitResult> SubmitPipelineAsync(
+        IAsyncEnumerable<SubmitRequest> requests,
+        int concurrency = 100,
         CancellationToken ct = default);
 }

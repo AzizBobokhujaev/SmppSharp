@@ -27,4 +27,15 @@ public sealed class SmppOptions
 
     /// <summary>Maximum reconnect attempts. 0 = infinite.</summary>
     public int MaxReconnectAttempts { get; set; } = 0;
+
+    // ── SSL/TLS ──────────────────────────────────────────────────
+
+    /// <summary>Enable SSL/TLS. Default: false.</summary>
+    public bool UseSsl { get; set; } = false;
+
+    /// <summary>TLS target hostname. Defaults to Host if not set.</summary>
+    public string? SslTargetHost { get; set; }
+
+    /// <summary>Skip certificate validation (useful for self-signed certs in dev). Default: false.</summary>
+    public bool AllowUntrustedCertificate { get; set; } = false;
 }

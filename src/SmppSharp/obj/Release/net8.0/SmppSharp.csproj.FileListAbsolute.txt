@@ -12,3 +12,4 @@
 /Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Release/net8.0/SmppSharp.xml
 /Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Release/net8.0/SmppSharp.pdb
 /Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Release/net8.0/ref/SmppSharp.dll
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Release/net8.0/SmppSharp.sourcelink.json

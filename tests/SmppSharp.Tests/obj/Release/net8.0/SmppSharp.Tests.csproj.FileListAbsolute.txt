@@ -108,3 +108,4 @@
 /Users/aziz/RiderProjects/SmppSharp/tests/SmppSharp.Tests/obj/Release/net8.0/SmppSharp.Tests.pdb
 /Users/aziz/RiderProjects/SmppSharp/tests/SmppSharp.Tests/obj/Release/net8.0/SmppSharp.Tests.genruntimeconfig.cache
 /Users/aziz/RiderProjects/SmppSharp/tests/SmppSharp.Tests/obj/Release/net8.0/ref/SmppSharp.Tests.dll
+/Users/aziz/RiderProjects/SmppSharp/tests/SmppSharp.Tests/obj/Release/net8.0/SmppSharp.Tests.sourcelink.json

@@ -15,20 +15,30 @@ internal static class MessageSplitter
     private const int Gsm7SegmentLimit = 153;
     private const int Ucs2SegmentLimit = 134; // bytes (67 chars × 2), must be even
 
-    public static EncodedMessage Encode(string message, bool forceUcs2 = false)
+    public static EncodedMessage Encode(string message, bool forceUcs2 = false, bool isFlash = false)
     {
         if (!forceUcs2 && Gsm7Encoder.CanEncode(message))
         {
-            var bytes    = Gsm7Encoder.Encode(message);
-            var segments = Split(bytes, Gsm7SingleLimit, Gsm7SegmentLimit);
-            return new EncodedMessage(Protocol.DataCoding.Gsm7, bytes, segments);
+            var bytes      = Gsm7Encoder.Encode(message);
+            var dataCoding = isFlash ? Protocol.DataCoding.Gsm7Flash : Protocol.DataCoding.Gsm7;
+            var segments   = Split(bytes, Gsm7SingleLimit, Gsm7SegmentLimit);
+            return new EncodedMessage(dataCoding, bytes, segments);
         }
         else
         {
-            var bytes    = Encoding.BigEndianUnicode.GetBytes(message);
-            var segments = Split(bytes, Ucs2SingleLimit, Ucs2SegmentLimit);
-            return new EncodedMessage(Protocol.DataCoding.Ucs2, bytes, segments);
+            var bytes      = Encoding.BigEndianUnicode.GetBytes(message);
+            var dataCoding = isFlash ? Protocol.DataCoding.Ucs2Flash : Protocol.DataCoding.Ucs2;
+            var segments   = Split(bytes, Ucs2SingleLimit, Ucs2SegmentLimit);
+            return new EncodedMessage(dataCoding, bytes, segments);
         }
+    }
+
+    /// <summary>Encodes a raw binary payload (data_coding = 0x04). Max 140 bytes/SMS.</summary>
+    public static EncodedMessage EncodeBinary(byte[] payload)
+    {
+        // Binary SMS: single = 140 bytes, multipart segment = 134 bytes
+        var segments = Split(payload, 140, 134);
+        return new EncodedMessage(Protocol.DataCoding.Binary, payload, segments);
     }
 
     private static List<byte[]> Split(byte[] data, int singleLimit, int segmentLimit)
