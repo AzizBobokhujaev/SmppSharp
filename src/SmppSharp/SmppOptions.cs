@@ -38,4 +38,11 @@ public sealed class SmppOptions
 
     /// <summary>Skip certificate validation (useful for self-signed certs in dev). Default: false.</summary>
     public bool AllowUntrustedCertificate { get; set; } = false;
+
+    /// <summary>
+    /// When true, multipart messages use UDH (User Data Header) for concatenation.
+    /// When false, uses SAR TLV parameters instead.
+    /// UDH is more widely supported by operator SMSCs and handsets. Default: true.
+    /// </summary>
+    public bool UseUdh { get; set; } = true;
 }

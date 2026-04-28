@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "QVhZqQTM/yQ=",
+  "dgSpecHash": "mv4x1nycHto=",
   "success": true,
   "projectFilePath": "/Users/aziz/RiderProjects/SmppSharp/tests/SmppSharp.Tests/SmppSharp.Tests.csproj",
   "expectedPackageFiles": [
@@ -101,6 +101,7 @@
     "/Users/aziz/.nuget/packages/xunit.extensibility.core/2.5.3/xunit.extensibility.core.2.5.3.nupkg.sha512",
     "/Users/aziz/.nuget/packages/xunit.extensibility.execution/2.5.3/xunit.extensibility.execution.2.5.3.nupkg.sha512",
     "/Users/aziz/.nuget/packages/xunit.runner.visualstudio/2.5.3/xunit.runner.visualstudio.2.5.3.nupkg.sha512",
+    "/Users/aziz/.nuget/packages/smppsharp/1.2.0/smppsharp.1.2.0.nupkg.sha512",
     "/Users/aziz/.nuget/packages/microsoft.netcore.app.ref/8.0.25/microsoft.netcore.app.ref.8.0.25.nupkg.sha512",
     "/Users/aziz/.nuget/packages/microsoft.aspnetcore.app.ref/8.0.25/microsoft.aspnetcore.app.ref.8.0.25.nupkg.sha512"
   ],

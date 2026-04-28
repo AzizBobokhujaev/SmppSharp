@@ -514,6 +514,13 @@
         <member name="P:SmppSharp.SmppOptions.AllowUntrustedCertificate">
             <summary>Skip certificate validation (useful for self-signed certs in dev). Default: false.</summary>
         </member>
+        <member name="P:SmppSharp.SmppOptions.UseUdh">
+            <summary>
+            When true, multipart messages use UDH (User Data Header) for concatenation.
+            When false, uses SAR TLV parameters instead.
+            UDH is more widely supported by operator SMSCs and handsets. Default: true.
+            </summary>
+        </member>
         <member name="T:System.Text.RegularExpressions.Generated.IdPattern_0">
             <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the IdPattern method.</summary>
         </member>

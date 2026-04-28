@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SmppSharp.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c23e186d2919ace5794bbb5e87b299fac2d28b96")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6392f41d98c3fcd137b1ae45b12e3b0c504911cf")]
 [assembly: System.Reflection.AssemblyProductAttribute("SmppSharp.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SmppSharp.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

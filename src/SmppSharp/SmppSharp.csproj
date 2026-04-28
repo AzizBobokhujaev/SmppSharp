@@ -8,7 +8,7 @@
 
     <!-- NuGet metadata -->
     <PackageId>SmppSharp</PackageId>
-    <Version>1.1.1</Version>
+    <Version>1.2.0</Version>
     <Authors>Aziz</Authors>
     <Description>Lightweight SMPP 3.4 client for .NET — connect, send, receive, auto-reconnect, multipart, GSM7/UCS2.</Description>
     <PackageTags>smpp;sms;messaging;smpp34;telecom</PackageTags>

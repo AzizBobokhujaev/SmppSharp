@@ -273,18 +273,44 @@ public sealed class SmppClient : ISmppClient
     private async Task<string> SubmitMultipartAsync(
         SubmitRequest request, EncodedMessage encoded, CancellationToken ct)
     {
-        var refNum = (ushort)Random.Shared.Next(1, 65536);
-        var total  = (byte)encoded.Segments.Count;
-        var lastId = string.Empty;
+        var refNum  = (byte)Random.Shared.Next(1, 256);
+        var total   = (byte)encoded.Segments.Count;
+        var lastId  = string.Empty;
+        var useUdh  = _options.UseUdh;
 
         for (byte i = 0; i < total; i++)
         {
+            var segBytes  = encoded.Segments[i];
+            byte esmClass = request.EsmClass;
+            ushort sarRef = 0;
+
+            byte[] msgBytes;
+            if (useUdh)
+            {
+                // Prepend 6-byte UDH: 05 00 03 <ref> <total> <seq>
+                // esmClass |= 0x40 (UDHI bit)
+                msgBytes = new byte[6 + segBytes.Length];
+                msgBytes[0] = 0x05;           // UDH length
+                msgBytes[1] = 0x00;           // IE ID: concat 8-bit ref
+                msgBytes[2] = 0x03;           // IE data length
+                msgBytes[3] = refNum;         // reference number
+                msgBytes[4] = total;          // total segments
+                msgBytes[5] = (byte)(i + 1);  // segment seq (1-based)
+                segBytes.CopyTo(msgBytes, 6);
+                esmClass |= 0x40;
+            }
+            else
+            {
+                msgBytes = segBytes;
+                sarRef   = (ushort)refNum;
+            }
+
             var body = BuildSubmitSmBody(
                 request.SourceAddress, request.DestinationAddress,
-                encoded.Segments[i], encoded.DataCoding,
+                msgBytes, encoded.DataCoding,
                 request.RegisteredDelivery, request.ValidityPeriod,
-                esmClass: request.EsmClass,
-                sarRef: refNum, sarTotal: total, sarSeq: (byte)(i + 1));
+                esmClass: esmClass,
+                sarRef: sarRef, sarTotal: useUdh ? (byte)0 : total, sarSeq: useUdh ? (byte)0 : (byte)(i + 1));
 
             var resp = await SendAndWaitAsync(CommandId.SubmitSm, body, ct);
 
@@ -294,7 +320,8 @@ public sealed class SmppClient : ISmppClient
                     resp.CommandStatus);
 
             lastId = new PduReader(resp.Body).ReadCString();
-            _logger.LogDebug("SMPP multipart {Seq}/{Total} → msgId={Id}", i + 1, total, lastId);
+            _logger.LogDebug("SMPP multipart {Mode} {Seq}/{Total} → msgId={Id}",
+                useUdh ? "UDH" : "SAR", i + 1, total, lastId);
         }
 
         return lastId;

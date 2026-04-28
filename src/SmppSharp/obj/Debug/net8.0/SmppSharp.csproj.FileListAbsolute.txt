@@ -1,0 +1,15 @@
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/bin/Debug/net8.0/SmppSharp.deps.json
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/bin/Debug/net8.0/SmppSharp.dll
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/bin/Debug/net8.0/SmppSharp.pdb
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/bin/Debug/net8.0/SmppSharp.xml
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.csproj.AssemblyReference.cache
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.GeneratedMSBuildEditorConfig.editorconfig
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.AssemblyInfoInputs.cache
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.AssemblyInfo.cs
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.csproj.CoreCompileInputs.cache
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.sourcelink.json
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.dll
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/refint/SmppSharp.dll
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.xml
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/SmppSharp.pdb
+/Users/aziz/RiderProjects/SmppSharp/src/SmppSharp/obj/Debug/net8.0/ref/SmppSharp.dll
