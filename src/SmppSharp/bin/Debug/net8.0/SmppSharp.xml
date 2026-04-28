@@ -451,6 +451,12 @@
             Integrates with System.Diagnostics.Metrics for observability.
             </summary>
         </member>
+        <member name="M:SmppSharp.SmppClient.SubmitWithPayloadAsync(SmppSharp.Models.SubmitRequest,SmppSharp.Codec.EncodedMessage,System.Threading.CancellationToken)">
+            <summary>
+            Sends a long message as a single submit_sm using message_payload TLV (0x0424).
+            sm_length=0, short_message empty. SMSC handles splitting and concatenation.
+            </summary>
+        </member>
         <member name="T:SmppSharp.SmppException">
             <summary>Exception thrown when an SMPP operation fails.</summary>
         </member>
@@ -519,6 +525,14 @@
             When true, multipart messages use UDH (User Data Header) for concatenation.
             When false, uses SAR TLV parameters instead.
             UDH is more widely supported by operator SMSCs and handsets. Default: true.
+            </summary>
+        </member>
+        <member name="P:SmppSharp.SmppOptions.UseMessagePayload">
+            <summary>
+            When true, long messages are sent as a single submit_sm using the message_payload TLV (0x0424)
+            instead of being split into multiple submit_sm PDUs.
+            Use this when the SMSC handles splitting/concatenation on its own side.
+            Default: false.
             </summary>
         </member>
         <member name="T:System.Text.RegularExpressions.Generated.IdPattern_0">

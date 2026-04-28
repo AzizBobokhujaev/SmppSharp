@@ -160,9 +160,11 @@ public sealed class SmppClient : ISmppClient
         var sw = Stopwatch.StartNew();
         try
         {
-            var messageId = encoded.IsMultipart
-                ? await SubmitMultipartAsync(request, encoded, ct)
-                : await SubmitSingleAsync(request, encoded.AllBytes, encoded.DataCoding, ct);
+            var messageId = encoded.IsMultipart && _options.UseMessagePayload
+                ? await SubmitWithPayloadAsync(request, encoded, ct)
+                : encoded.IsMultipart
+                    ? await SubmitMultipartAsync(request, encoded, ct)
+                    : await SubmitSingleAsync(request, encoded.AllBytes, encoded.DataCoding, ct);
 
             sw.Stop();
             SmppMetrics.MessagesSent.Add(encoded.Segments.Count);
@@ -327,12 +329,38 @@ public sealed class SmppClient : ISmppClient
         return lastId;
     }
 
+    /// <summary>
+    /// Sends a long message as a single submit_sm using message_payload TLV (0x0424).
+    /// sm_length=0, short_message empty. SMSC handles splitting and concatenation.
+    /// </summary>
+    private async Task<string> SubmitWithPayloadAsync(
+        SubmitRequest request, EncodedMessage encoded, CancellationToken ct)
+    {
+        var body = BuildSubmitSmBody(
+            request.SourceAddress, request.DestinationAddress,
+            [], encoded.DataCoding,
+            request.RegisteredDelivery, request.ValidityPeriod,
+            esmClass: request.EsmClass,
+            messagePayload: encoded.AllBytes);
+
+        var resp = await SendAndWaitAsync(CommandId.SubmitSm, body, ct);
+
+        if (!resp.IsOk)
+            throw new SmppException(
+                $"submit_sm (message_payload) failed: {CommandStatus.Describe(resp.CommandStatus)}", resp.CommandStatus);
+
+        var messageId = new PduReader(resp.Body).ReadCString();
+        _logger.LogDebug("SMPP message_payload len={Len} → msgId={Id}", encoded.AllBytes.Length, messageId);
+        return messageId;
+    }
+
     private static byte[] BuildSubmitSmBody(
         string sourceAddr, string destAddr,
         byte[] msgBytes, byte dataCoding,
         bool registeredDelivery, TimeSpan? validityPeriod,
         byte esmClass = 0x00,
-        ushort sarRef = 0, byte sarTotal = 0, byte sarSeq = 0)
+        ushort sarRef = 0, byte sarTotal = 0, byte sarSeq = 0,
+        byte[]? messagePayload = null)
     {
         var srcTon = sourceAddr.Any(char.IsLetter) ? (byte)0x05 : (byte)0x01;
         var srcNpi = srcTon == 0x05 ? (byte)0x00 : (byte)0x01;
@@ -358,14 +386,24 @@ public sealed class SmppClient : ISmppClient
         PduWriter.WriteByte(body, 0x00);                // replace_if_present
         PduWriter.WriteByte(body, dataCoding);
         PduWriter.WriteByte(body, 0x00);                // sm_default_msg_id
-        PduWriter.WriteByte(body, (byte)msgBytes.Length);
-        PduWriter.WriteOctets(body, msgBytes);
 
-        if (sarTotal > 1)
+        if (messagePayload != null)
         {
-            PduWriter.WriteTlvUInt16(body, TlvTag.SarMsgRefNum,     sarRef);
-            PduWriter.WriteTlvByte(body,   TlvTag.SarTotalSegments, sarTotal);
-            PduWriter.WriteTlvByte(body,   TlvTag.SarSegmentSeqnum, sarSeq);
+            // message_payload TLV: sm_length=0, short_message empty, full text in TLV 0x0424
+            PduWriter.WriteByte(body, 0x00);
+            PduWriter.WriteTlvOctets(body, TlvTag.MessagePayload, messagePayload);
+        }
+        else
+        {
+            PduWriter.WriteByte(body, (byte)msgBytes.Length);
+            PduWriter.WriteOctets(body, msgBytes);
+
+            if (sarTotal > 1)
+            {
+                PduWriter.WriteTlvUInt16(body, TlvTag.SarMsgRefNum,     sarRef);
+                PduWriter.WriteTlvByte(body,   TlvTag.SarTotalSegments, sarTotal);
+                PduWriter.WriteTlvByte(body,   TlvTag.SarSegmentSeqnum, sarSeq);
+            }
         }
 
         return [.. body];

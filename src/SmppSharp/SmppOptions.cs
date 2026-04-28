@@ -45,4 +45,12 @@ public sealed class SmppOptions
     /// UDH is more widely supported by operator SMSCs and handsets. Default: true.
     /// </summary>
     public bool UseUdh { get; set; } = true;
+
+    /// <summary>
+    /// When true, long messages are sent as a single submit_sm using the message_payload TLV (0x0424)
+    /// instead of being split into multiple submit_sm PDUs.
+    /// Use this when the SMSC handles splitting/concatenation on its own side.
+    /// Default: false.
+    /// </summary>
+    public bool UseMessagePayload { get; set; } = false;
 }

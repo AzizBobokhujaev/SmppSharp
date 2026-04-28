@@ -61,6 +61,9 @@ internal static class PduWriter
     public static void WriteTlvUInt16(List<byte> buf, ushort tag, ushort value)
         => WriteTlv(buf, tag, [(byte)(value >> 8), (byte)value]);
 
+    public static void WriteTlvOctets(List<byte> buf, ushort tag, byte[] value)
+        => WriteTlv(buf, tag, value);
+
     // ── Helpers ─────────────────────────────────────────────────
 
     private static void WriteUInt32(byte[] buf, int offset, uint value)
