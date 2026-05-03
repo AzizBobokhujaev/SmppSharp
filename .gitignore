@@ -1,0 +1,25 @@
+## Build artifacts
+bin/
+obj/
+
+## NuGet packages (local build output)
+nupkg/
+*.nupkg
+
+## JetBrains Rider
+.idea/
+
+## VS / MSBuild
+*.user
+*.suo
+.vs/
+
+## dotnet
+*.userprefs
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## OS
+.DS_Store
+Thumbs.db
