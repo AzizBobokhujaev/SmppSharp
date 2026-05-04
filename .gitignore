@@ -13,6 +13,8 @@ nupkg/
 *.user
 *.suo
 .vs/
+.env
+*.env.*
 
 ## dotnet
 *.userprefs

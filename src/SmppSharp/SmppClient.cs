@@ -141,6 +141,7 @@ public sealed class SmppClient : ISmppClient
 
         if (_readLoop      != null) try { await _readLoop; }      catch { }
         if (_keepAliveLoop != null) try { await _keepAliveLoop; } catch { }
+        if (_reconnectLoop != null) try { await _reconnectLoop; } catch { }
 
         _stream = null;
         _tcp    = null;
