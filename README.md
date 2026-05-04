@@ -5,7 +5,7 @@ Lightweight SMPP 3.4 client for .NET 8+. No external dependencies.
 ## Features
 
 - **Text SMS** — auto-detect GSM7 (Latin) or UCS2 (Cyrillic, Arabic, Chinese, Hebrew, Greek, emoji)
-- **Long messages** — automatic multipart splitting via SAR TLV
+- **Long messages** — automatic multipart splitting via UDH (default), SAR TLV, or `message_payload` TLV
 - **Flash SMS** — Class 0 messages displayed immediately without storing
 - **Binary SMS** — raw byte payload (OTA configs, ringtones, etc.)
 - **WAP Push** — Service Indication (SI) with URL and message text
@@ -216,9 +216,11 @@ new SmppOptions
     ReconnectDelay           = TimeSpan.FromSeconds(5),
     AutoReconnect            = true,
     MaxReconnectAttempts     = 0,   // 0 = infinite
-    UseSsl                   = false,
-    SslTargetHost            = null,
+    UseSsl                    = false,
+    SslTargetHost             = null,
     AllowUntrustedCertificate = false,
+    UseUdh                    = true,   // multipart via UDH; false = SAR TLV
+    UseMessagePayload         = false,  // send long message as single PDU via message_payload TLV
 }
 ```
 
