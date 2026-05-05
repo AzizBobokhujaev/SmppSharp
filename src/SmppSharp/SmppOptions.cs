@@ -28,6 +28,15 @@ public sealed class SmppOptions
     /// <summary>Maximum reconnect attempts. 0 = infinite.</summary>
     public int MaxReconnectAttempts { get; set; } = 0;
 
+    /// <summary>TCP connect timeout. Default: 15s. Prevents waiting minutes for OS timeout.</summary>
+    public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>Enable TCP KeepAlive to detect dead connections faster. Default: true.</summary>
+    public bool TcpKeepAlive { get; set; } = true;
+
+    /// <summary>TCP KeepAlive interval in seconds. Default: 15s.</summary>
+    public int TcpKeepAliveInterval { get; set; } = 15;
+
     // ── SSL/TLS ──────────────────────────────────────────────────
 
     /// <summary>Enable SSL/TLS. Default: false.</summary>

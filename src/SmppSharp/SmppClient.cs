@@ -59,8 +59,32 @@ public sealed class SmppClient : ISmppClient
 
     private async Task ConnectInternalAsync(CancellationToken ct)
     {
+        // Clean up old loops/streams before creating new ones (reconnect scenario)
+        _stream?.Dispose();
+        _tcp?.Dispose();
+
         _tcp = new TcpClient { NoDelay = true };
-        await _tcp.ConnectAsync(_options.Host, _options.Port, ct);
+
+        // TCP KeepAlive to detect dead connections at OS level
+        if (_options.TcpKeepAlive)
+        {
+            _tcp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            _tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, _options.TcpKeepAliveInterval);
+            _tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, _options.TcpKeepAliveInterval);
+            _tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+        }
+
+        // Connect with timeout to avoid waiting minutes for OS default
+        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        connectCts.CancelAfter(_options.ConnectTimeout);
+        try
+        {
+            await _tcp.ConnectAsync(_options.Host, _options.Port, connectCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new SmppException($"TCP connect to {_options.Host}:{_options.Port} timed out after {_options.ConnectTimeout.TotalSeconds}s");
+        }
 
         Stream baseStream = _tcp.GetStream();
 
@@ -537,19 +561,34 @@ public sealed class SmppClient : ISmppClient
 
     // ── Keepalive ────────────────────────────────────────────────
 
+    private int _enquireLinkFailCount;
+
     private async Task KeepAliveLoopAsync(CancellationToken ct)
     {
+        _enquireLinkFailCount = 0;
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 await Task.Delay(_options.EnquireLinkInterval, ct);
-                if (!IsConnected) continue;
+                if (!IsConnected) break; // exit loop — reconnect will start a new one
                 await SendAndWaitAsync(CommandId.EnquireLink, [], ct);
+                Interlocked.Exchange(ref _enquireLinkFailCount, 0);
                 _logger.LogTrace("SMPP enquire_link OK");
             }
             catch (OperationCanceledException) { break; }
-            catch (Exception ex) { _logger.LogWarning(ex, "SMPP enquire_link failed"); }
+            catch (Exception ex)
+            {
+                var fails = Interlocked.Increment(ref _enquireLinkFailCount);
+                _logger.LogWarning(ex, "SMPP enquire_link failed ({Fails} consecutive)", fails);
+                if (fails >= 2)
+                {
+                    // 2 consecutive failures → treat as dead connection
+                    _logger.LogError("SMPP enquire_link failed {Fails} times — forcing disconnect", fails);
+                    HandleDisconnect(ex);
+                    break;
+                }
+            }
         }
     }
 
@@ -563,6 +602,10 @@ public sealed class SmppClient : ISmppClient
                 await Task.Delay(500, ct);
 
             if (ct.IsCancellationRequested) break;
+
+            // Wait for old loops to finish before reconnecting
+            if (_readLoop != null) try { await _readLoop; } catch { }
+            if (_keepAliveLoop != null) try { await _keepAliveLoop; } catch { }
 
             var attempt = 0;
             while (!IsConnected && !ct.IsCancellationRequested)
@@ -594,13 +637,14 @@ public sealed class SmppClient : ISmppClient
 
     private void HandleDisconnect(Exception? ex)
     {
-        if (!IsConnected) return;
-        SmppMetrics.ActiveConnections.Add(-1);
-        IsConnected = false;
-
+        // Always fail pending requests (e.g. bind during initial connect) regardless of IsConnected.
         foreach (var tcs in _pending.Values)
             tcs.TrySetException(new SmppException("Connection lost", ex));
         _pending.Clear();
+
+        if (!IsConnected) return;
+        SmppMetrics.ActiveConnections.Add(-1);
+        IsConnected = false;
 
         OnDisconnected?.Invoke(ex);
     }
