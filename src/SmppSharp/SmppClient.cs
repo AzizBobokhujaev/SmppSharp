@@ -46,6 +46,34 @@ public sealed class SmppClient : ISmppClient
         _logger  = logger ?? NullLogger<SmppClient>.Instance;
     }
 
+    private void LogVerbose(string message, params object?[] args)
+    {
+        if (_options.VerboseLogging)
+            _logger.LogInformation("[SMPP-VERBOSE] " + message, args);
+    }
+
+    private static string CommandName(uint id) => id switch
+    {
+        CommandId.BindTransceiver     => "bind_transceiver",
+        CommandId.BindTransceiverResp => "bind_transceiver_resp",
+        CommandId.BindTransmitter     => "bind_transmitter",
+        CommandId.BindTransmitterResp => "bind_transmitter_resp",
+        CommandId.BindReceiver        => "bind_receiver",
+        CommandId.BindReceiverResp    => "bind_receiver_resp",
+        CommandId.SubmitSm            => "submit_sm",
+        CommandId.SubmitSmResp        => "submit_sm_resp",
+        CommandId.DeliverSm           => "deliver_sm",
+        CommandId.DeliverSmResp       => "deliver_sm_resp",
+        CommandId.EnquireLink         => "enquire_link",
+        CommandId.EnquireLinkResp     => "enquire_link_resp",
+        CommandId.Unbind              => "unbind",
+        CommandId.UnbindResp          => "unbind_resp",
+        CommandId.GenericNack         => "generic_nack",
+        CommandId.QuerySm             => "query_sm",
+        CommandId.QuerySmResp         => "query_sm_resp",
+        _                             => $"0x{id:X8}",
+    };
+
     // ── Connection ───────────────────────────────────────────────
 
     public async Task ConnectAsync(CancellationToken ct = default)
@@ -59,6 +87,8 @@ public sealed class SmppClient : ISmppClient
 
     private async Task ConnectInternalAsync(CancellationToken ct)
     {
+        LogVerbose("ConnectInternal starting to {Host}:{Port}", _options.Host, _options.Port);
+
         // Clean up old loops/streams before creating new ones (reconnect scenario)
         _stream?.Dispose();
         _tcp?.Dispose();
@@ -72,9 +102,14 @@ public sealed class SmppClient : ISmppClient
             _tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, _options.TcpKeepAliveInterval);
             _tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, _options.TcpKeepAliveInterval);
             _tcp.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+            LogVerbose("TCP KeepAlive enabled: interval={Interval}s, retries=3", _options.TcpKeepAliveInterval);
         }
 
         // Connect with timeout to avoid waiting minutes for OS default
+        LogVerbose("TCP connecting to {Host}:{Port} (timeout={Timeout}s)…",
+            _options.Host, _options.Port, _options.ConnectTimeout.TotalSeconds);
+        var sw = Stopwatch.StartNew();
+
         using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         connectCts.CancelAfter(_options.ConnectTimeout);
         try
@@ -85,6 +120,9 @@ public sealed class SmppClient : ISmppClient
         {
             throw new SmppException($"TCP connect to {_options.Host}:{_options.Port} timed out after {_options.ConnectTimeout.TotalSeconds}s");
         }
+
+        sw.Stop();
+        LogVerbose("TCP connected in {Elapsed}ms", sw.ElapsedMilliseconds);
 
         Stream baseStream = _tcp.GetStream();
 
@@ -107,9 +145,11 @@ public sealed class SmppClient : ISmppClient
             _stream = baseStream;
         }
 
+        LogVerbose("Starting read loop and keepalive loop");
         _readLoop      = Task.Run(() => ReadLoopAsync(ct), CancellationToken.None);
         _keepAliveLoop = Task.Run(() => KeepAliveLoopAsync(ct), CancellationToken.None);
 
+        LogVerbose("Sending bind (mode={Mode}, systemId={SystemId})", _options.BindMode, _options.SystemId);
         await BindAsync(ct);
 
         IsConnected = true;
@@ -438,6 +478,7 @@ public sealed class SmppClient : ISmppClient
 
     private async Task ReadLoopAsync(CancellationToken ct)
     {
+        LogVerbose("Read loop started");
         var header = new byte[16];
         while (!ct.IsCancellationRequested)
         {
@@ -449,6 +490,9 @@ public sealed class SmppClient : ISmppClient
                 var cmdId  = r.ReadUInt32();
                 var status = r.ReadUInt32();
                 var seq    = r.ReadUInt32();
+
+                LogVerbose("PDU recv: cmd={Cmd} status=0x{Status:X8} seq={Seq} len={Len}",
+                    CommandName(cmdId), status, seq, length);
 
                 var bodyLen = (int)length - 16;
                 var body    = bodyLen > 0 ? new byte[bodyLen] : [];
@@ -463,14 +507,20 @@ public sealed class SmppClient : ISmppClient
                     Body           = body,
                 }, ct);
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException)
+            {
+                LogVerbose("Read loop cancelled");
+                break;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "SMPP read loop error");
+                _logger.LogError(ex, "SMPP read loop error: {Message}", ex.Message);
+                LogVerbose("Read loop exiting due to error: {Type}: {Message}", ex.GetType().Name, ex.Message);
                 HandleDisconnect(ex);
                 break;
             }
         }
+        LogVerbose("Read loop ended");
     }
 
     private async Task DispatchAsync(Pdu pdu, CancellationToken ct)
@@ -565,37 +615,47 @@ public sealed class SmppClient : ISmppClient
 
     private async Task KeepAliveLoopAsync(CancellationToken ct)
     {
+        LogVerbose("KeepAlive loop started (interval={Interval}s)", _options.EnquireLinkInterval.TotalSeconds);
         _enquireLinkFailCount = 0;
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 await Task.Delay(_options.EnquireLinkInterval, ct);
-                if (!IsConnected) break; // exit loop — reconnect will start a new one
+                if (!IsConnected)
+                {
+                    LogVerbose("KeepAlive: IsConnected=false, exiting loop");
+                    break;
+                }
+                var sw = Stopwatch.StartNew();
                 await SendAndWaitAsync(CommandId.EnquireLink, [], ct);
+                sw.Stop();
                 Interlocked.Exchange(ref _enquireLinkFailCount, 0);
-                _logger.LogTrace("SMPP enquire_link OK");
+                LogVerbose("enquire_link OK (rtt={Rtt}ms)", sw.ElapsedMilliseconds);
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
                 var fails = Interlocked.Increment(ref _enquireLinkFailCount);
-                _logger.LogWarning(ex, "SMPP enquire_link failed ({Fails} consecutive)", fails);
+                _logger.LogWarning(ex, "SMPP enquire_link failed ({Fails} consecutive): {Message}", fails, ex.Message);
                 if (fails >= 2)
                 {
-                    // 2 consecutive failures → treat as dead connection
                     _logger.LogError("SMPP enquire_link failed {Fails} times — forcing disconnect", fails);
                     HandleDisconnect(ex);
                     break;
                 }
             }
         }
+        LogVerbose("KeepAlive loop ended");
     }
 
     // ── Auto-reconnect ───────────────────────────────────────────
 
     private async Task ReconnectLoopAsync(CancellationToken ct)
     {
+        LogVerbose("Reconnect loop started (autoReconnect={Auto}, delay={Delay}s)",
+            _options.AutoReconnect, _options.ReconnectDelay.TotalSeconds);
+
         while (!ct.IsCancellationRequested)
         {
             while (IsConnected && !ct.IsCancellationRequested)
@@ -603,9 +663,10 @@ public sealed class SmppClient : ISmppClient
 
             if (ct.IsCancellationRequested) break;
 
-            // Wait for old loops to finish before reconnecting
+            LogVerbose("Reconnect loop: connection lost, waiting for old loops to finish…");
             if (_readLoop != null) try { await _readLoop; } catch { }
             if (_keepAliveLoop != null) try { await _keepAliveLoop; } catch { }
+            LogVerbose("Reconnect loop: old loops finished");
 
             var attempt = 0;
             while (!IsConnected && !ct.IsCancellationRequested)
@@ -617,19 +678,20 @@ public sealed class SmppClient : ISmppClient
                     return;
                 }
 
-                _logger.LogInformation("SMPP reconnect attempt {Attempt}…", attempt);
+                _logger.LogInformation("SMPP reconnect attempt {Attempt} to {Host}:{Port}…",
+                    attempt, _options.Host, _options.Port);
                 SmppMetrics.Reconnects.Add(1);
 
                 try
                 {
                     await Task.Delay(_options.ReconnectDelay, ct);
                     await ConnectInternalAsync(ct);
-                    _logger.LogInformation("SMPP reconnected successfully");
+                    _logger.LogInformation("SMPP reconnected successfully after {Attempts} attempt(s)", attempt);
                     OnReconnected?.Invoke();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "SMPP reconnect attempt {Attempt} failed", attempt);
+                    _logger.LogWarning("SMPP reconnect attempt {Attempt} failed: {Error}", attempt, ex.Message);
                 }
             }
         }
@@ -637,6 +699,10 @@ public sealed class SmppClient : ISmppClient
 
     private void HandleDisconnect(Exception? ex)
     {
+        var pendingCount = _pending.Count;
+        LogVerbose("HandleDisconnect called: IsConnected={Connected}, pending={Pending}, reason={Reason}",
+            IsConnected, pendingCount, ex?.Message ?? "null");
+
         // Always fail pending requests (e.g. bind during initial connect) regardless of IsConnected.
         foreach (var tcs in _pending.Values)
             tcs.TrySetException(new SmppException("Connection lost", ex));
@@ -646,6 +712,8 @@ public sealed class SmppClient : ISmppClient
         SmppMetrics.ActiveConnections.Add(-1);
         IsConnected = false;
 
+        _logger.LogWarning("SMPP disconnected from {Host}:{Port}: {Reason}",
+            _options.Host, _options.Port, ex?.Message ?? "unknown");
         OnDisconnected?.Invoke(ex);
     }
 
@@ -657,13 +725,26 @@ public sealed class SmppClient : ISmppClient
         var raw = PduWriter.Build(commandId, 0, seq, body);
         var tcs = new TaskCompletionSource<Pdu>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        LogVerbose("PDU send: cmd={Cmd} seq={Seq} bodyLen={Len}", CommandName(commandId), seq, body.Length);
+
         _pending[seq] = tcs;
         try
         {
             await SendRawAsync(raw, ct);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(_options.ResponseTimeout);
-            return await tcs.Task.WaitAsync(timeout.Token);
+            var sw = Stopwatch.StartNew();
+            var resp = await tcs.Task.WaitAsync(timeout.Token);
+            sw.Stop();
+            LogVerbose("PDU resp: cmd={Cmd} seq={Seq} status=0x{Status:X8} rtt={Rtt}ms",
+                CommandName(resp.CommandId), seq, resp.CommandStatus, sw.ElapsedMilliseconds);
+            return resp;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError("SMPP response timeout: cmd={Cmd} seq={Seq} after {Timeout}s (pending={Pending})",
+                CommandName(commandId), seq, _options.ResponseTimeout.TotalSeconds, _pending.Count);
+            throw;
         }
         finally { _pending.TryRemove(seq, out _); }
     }

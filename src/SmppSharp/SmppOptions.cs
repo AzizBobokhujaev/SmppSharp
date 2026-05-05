@@ -37,6 +37,12 @@ public sealed class SmppOptions
     /// <summary>TCP KeepAlive interval in seconds. Default: 15s.</summary>
     public int TcpKeepAliveInterval { get; set; } = 15;
 
+    /// <summary>
+    /// Enable verbose PDU-level logging. Logs every sent/received PDU, timing, state transitions.
+    /// Similar to Inetlab.Smpp's LogPdu mode. Default: false.
+    /// </summary>
+    public bool VerboseLogging { get; set; } = false;
+
     // ── SSL/TLS ──────────────────────────────────────────────────
 
     /// <summary>Enable SSL/TLS. Default: false.</summary>
