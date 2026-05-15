@@ -185,8 +185,8 @@ public sealed class SmppClient : ISmppClient
 
     public async Task DisconnectAsync(CancellationToken ct = default)
     {
-        if (!IsConnected) return;
-        try { await SendAndWaitAsync(CommandId.Unbind, [], ct); } catch { }
+        if (IsConnected)
+            try { await SendAndWaitAsync(CommandId.Unbind, [], ct); } catch { }
         await CleanupAsync();
     }
 
@@ -771,6 +771,7 @@ public sealed class SmppClient : ISmppClient
 
     public async ValueTask DisposeAsync()
     {
+        _cts?.Cancel();
         await DisconnectAsync();
         _cts?.Dispose();
         _writeLock.Dispose();
